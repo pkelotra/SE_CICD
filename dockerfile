@@ -1,16 +1,23 @@
-# Use an image that has Maven and Java 21 pre-installed
-FROM maven:3.9-eclipse-temurin-21-alpine
+# ---------------------------
+# Stage 1: Build with Maven
+# ---------------------------
+FROM maven:3.9-eclipse-temurin-21-alpine AS builder
 
-# Set working directory
 WORKDIR /app
 
-# Copy all your project files (pom.xml, src, etc.) into the container
-COPY . .
+COPY pom.xml .
+RUN mvn -q -e -DskipTests dependency:resolve
 
-# Compile the code (Using Maven to handle the package paths correctly)
-# We skip tests here because Jenkins already ran them in the previous stage
+COPY src ./src
 RUN mvn clean package -DskipTests
 
-# Run the application
-# We point to the specific class inside the package
-CMD ["java", "-cp", "target/classes", "com.example.ToDoList"]
+# ---------------------------
+# Stage 2: Run the JAR
+# ---------------------------
+FROM eclipse-temurin:21-jre-alpine
+
+WORKDIR /app
+
+COPY --from=builder /app/target/todo-list-1.0-SNAPSHOT.jar app.jar
+
+ENTRYPOINT ["java", "-jar", "app.jar"]
