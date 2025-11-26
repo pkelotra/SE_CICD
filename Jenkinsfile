@@ -31,20 +31,27 @@ pipeline {
             }
         }
 
-        stage('Docker Build & Push') {
+       stage('Docker Build & Push') {
             steps {
                 script {
                     echo 'Tests passed. Building Docker Image...'
-                    docker.withRegistry('', REGISTRY_CRED) {
-                        // 1. Build the image
-                        // We use the Dockerfile we just created
-                        def appImage = docker.build("${DOCKER_HUB_USER}/${REPO_NAME}:${env.BUILD_ID}")
+                    
+                    // We use this wrapper to securely inject your credentials
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-login', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         
-                        // 2. Push with the Build ID (e.g., :15)
-                        appImage.push()
+                        // 1. Login to Docker Hub
+                        // We use %VAR% to access the password securely in Windows
+                        bat 'docker login -u %DOCKER_USER% -p %DOCKER_PASS%'
                         
-                        // 3. Push as 'latest' so it's easy to pull
-                        appImage.push('latest')
+                        // 2. Build the image
+                        bat "docker build -t ${env.DOCKER_HUB_USER}/${env.REPO_NAME}:${env.BUILD_ID} ."
+                        
+                        // 3. Push the specific version
+                        bat "docker push ${env.DOCKER_HUB_USER}/${env.REPO_NAME}:${env.BUILD_ID}"
+                        
+                        // 4. Tag and Push 'latest'
+                        bat "docker tag ${env.DOCKER_HUB_USER}/${env.REPO_NAME}:${env.BUILD_ID} ${env.DOCKER_HUB_USER}/${env.REPO_NAME}:latest"
+                        bat "docker push ${env.DOCKER_HUB_USER}/${env.REPO_NAME}:latest"
                     }
                 }
             }
