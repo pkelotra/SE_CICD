@@ -1,53 +1,82 @@
 pipeline {
     agent any
+    
+    // 1. We keep this because you need Maven (Your friend didn't need this because he hardcoded Python path)
     tools {
         maven 'Maven-3.9.11' 
     }
-    environment {
-        // --- CONFIGURATION ---
-        // Your Docker Hub Username
-        DOCKER_HUB_USER = 'pkelotra' 
-        
-        // Your Roll Number
-        REPO_NAME = 'imt2023563' 
-        
-        // The ID we created in Jenkins Credentials
-        REGISTRY_CRED = 'dockerhub-login'
-    }
 
+    environment {
+        // --- YOUR CONFIGURATION ---
+        DOCKERHUB_USERNAME = 'pkelotra'
+        IMAGE_NAME = 'imt2023563'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+
+        // This pulls your username/password safely from Jenkins Credentials
+        // Make sure 'dockerhub-login' matches the ID you created in Jenkins
+        DOCKERHUB_CREDS = credentials('dockerhub-login')
+    }
+    
     stages {
+
         stage('Checkout') {
             steps {
-                checkout scm
+                echo "Pulling code from GitHub..."
+                // Using your Repo URL
+                git branch: 'main',
+                    url: 'https://github.com/pkelotra/SE_CICD.git'
             }
         }
 
         stage('Build & Test') {
             steps {
-                echo 'Running Maven Build and Tests...'
-                // This runs the JUnit tests we wrote. 
-                // If tests fail, the pipeline stops here.
-                bat 'mvn clean test'
+                echo "Compiling and Testing Java code..."
+                // Friend used: pip install ...
+                // You use: Maven
+                // 'clean package' runs tests AND builds the JAR file
+                bat 'mvn clean package' 
             }
         }
 
-        stage('Docker Build & Push') {
+        stage('Build Docker Image') {
             steps {
-                script {
-                    echo 'Tests passed. Building Docker Image...'
-                    docker.withRegistry('', REGISTRY_CRED) {
-                        // 1. Build the image
-                        // We use the Dockerfile we just created
-                        def appImage = docker.build("${DOCKER_HUB_USER}/${REPO_NAME}:${env.BUILD_ID}")
-                        
-                        // 2. Push with the Build ID (e.g., :15)
-                        appImage.push()
-                        
-                        // 3. Push as 'latest' so it's easy to pull
-                        appImage.push('latest')
-                    }
-                }
+                echo "Building Docker image..."
+                // Exactly like your friend's, but using your variables
+                bat "docker build -t %DOCKERHUB_USERNAME%/%IMAGE_NAME%:%IMAGE_TAG% ."
+                bat "docker build -t %DOCKERHUB_USERNAME%/%IMAGE_NAME%:latest ."
             }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                echo "Pushing Docker image..."
+                // Jenkins automatically creates _USR and _PSW variables from the credentials line above
+                bat "docker login -u %DOCKERHUB_CREDS_USR% -p %DOCKERHUB_CREDS_PSW%"
+                
+                bat "docker push %DOCKERHUB_USERNAME%/%IMAGE_NAME%:%IMAGE_TAG%"
+                bat "docker push %DOCKERHUB_USERNAME%/%IMAGE_NAME%:latest"
+                
+                bat "docker logout"
+            }
+        }
+
+        stage('Verify Docker Image') {
+            steps {
+                // Verifying if the image exists locally
+                bat "docker images | findstr %IMAGE_NAME%"
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✓ Pipeline completed successfully!"
+        }
+        failure {
+            echo "✗ Pipeline failed!"
+        }
+        always {
+            cleanWs()
         }
     }
 }
