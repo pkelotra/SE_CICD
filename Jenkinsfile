@@ -2,75 +2,62 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_IMAGE = "pkelotra/imt2023563:latest"
+        // --- CONFIGURATION ---
+        // Your Docker Hub Username
+        DOCKER_HUB_USER = 'pkelotra' 
+        
+        // Your Roll Number (Must match the Repo name you created on Docker Hub)
+        REPO_NAME = 'imt2023563' 
+        
+        // The ID of the credentials stored in Jenkins
+        REGISTRY_CRED = 'dockerhub'
     }
 
     stages {
-
         stage('Checkout') {
             steps {
-                echo "Pulling code from GitHub..."
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: "*/main"]],
-                    userRemoteConfigs: [[
-                        url: 'https://github.com/pkelotra/SE_CICD.git',
-                        credentialsId: 'github-Credentials'
-                    ]]
-                ])
+                checkout scm
             }
         }
 
         stage('Build & Test') {
             steps {
-                echo "Compiling and testing Java code..."
-                bat "mvn clean package"
+                echo 'Running Maven Build and Tests...'
+                // runs the JUnit tests. If this fails, the pipeline stops.
+                bat 'mvn clean test'
             }
         }
 
-        stage('Docker Login') {
+        stage('Docker Build & Push') {
             steps {
-                echo "Logging in to Docker Hub..."
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub',
-                    passwordVariable: 'DOCKER_PASS',
-                    usernameVariable: 'DOCKER_USER'
-                )]) {
-                    bat """
-                        echo %DOCKER_PASS% | docker login -u %DOCKER_USER% --password-stdin
-                    """
+                script {
+                    echo 'Tests passed. Building Docker Image...'
+                    
+                    // WINDOWS FIX: We use 'withCredentials' to handle login manually 
+                    // This avoids the "context desktop-linux" error
+                    withCredentials([usernamePassword(credentialsId: REGISTRY_CRED, passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER')]) {
+                        
+                        // 1. Log in to Docker Hub
+                        // We pipe the password into the command for security
+                        bat 'echo %DOCKER_PASS% | docker login -u %DOCKER_USER% --password-stdin'
+                        
+                        // 2. Build the image
+                        bat "docker build -t ${DOCKER_HUB_USER}/${REPO_NAME}:${env.BUILD_ID} ."
+                        
+                        // 3. Tag it as 'latest'
+                        bat "docker tag ${DOCKER_HUB_USER}/${REPO_NAME}:${env.BUILD_ID} ${DOCKER_HUB_USER}/${REPO_NAME}:latest"
+                        
+                        // 4. Push the numbered version (e.g., :15)
+                        bat "docker push ${DOCKER_HUB_USER}/${REPO_NAME}:${env.BUILD_ID}"
+                        
+                        // 5. Push the 'latest' version
+                        bat "docker push ${DOCKER_HUB_USER}/${REPO_NAME}:latest"
+                        
+                        // 6. Logout for security
+                        bat 'docker logout'
+                    }
                 }
             }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                echo "Building Docker image..."
-                bat "docker build -t %DOCKER_IMAGE% ."
-            }
-        }
-
-        stage('Push Docker Image') {
-            steps {
-                echo "Pushing Docker image to Docker Hub..."
-                bat "docker push %DOCKER_IMAGE%"
-            }
-        }
-
-        stage('Verify Docker Image') {
-            steps {
-                echo "Running container to verify..."
-                bat """
-                    docker run --rm %DOCKER_IMAGE% java -version
-                """
-            }
-        }
-    }
-
-    post {
-        always {
-            echo "Cleaning up workspace..."
-            cleanWs()
         }
     }
 }
